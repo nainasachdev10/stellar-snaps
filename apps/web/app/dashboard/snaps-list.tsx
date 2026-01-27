@@ -58,37 +58,47 @@ export default function SnapsList({ creator, refreshKey }: Props) {
     navigator.clipboard.writeText(url);
   };
 
+  const cardBase =
+    'bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-8';
+
   if (loading) {
     return (
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-        <p className="text-gray-400 text-center">Loading...</p>
+      <div className={cardBase}>
+        <h2 className="text-lg font-bold text-gray-900 mb-6">Your Snaps</h2>
+        <p className="text-gray-500 text-center text-sm">Loading...</p>
       </div>
     );
   }
 
   if (snaps.length === 0) {
     return (
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-        <p className="text-gray-400 text-center">No snaps yet. Create your first one!</p>
+      <div className={cardBase}>
+        <h2 className="text-lg font-bold text-gray-900 mb-6">Your Snaps</h2>
+        <p className="text-gray-500 text-center text-sm">No snaps yet. Create your first one!</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-3">
-      {snaps.map((snap) => (
-        <div key={snap.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-          <div className="flex items-start justify-between">
+    <div className={cardBase}>
+      {/* Title inside card – bold, dark, like reference */}
+      <h2 className="text-lg font-bold text-gray-900 mb-6">Your Snaps</h2>
+      <div className="space-y-3">
+        {snaps.map((snap) => (
+          <div
+            key={snap.id}
+            className="bg-gray-50 rounded-xl border border-gray-100 p-4 flex items-start justify-between gap-4"
+          >
             <div className="flex-1 min-w-0">
-              <h3 className="text-white font-medium truncate">{snap.title}</h3>
-              <p className="text-gray-500 text-sm">
+              <h3 className="text-gray-900 font-semibold truncate text-base">{snap.title}</h3>
+              <p className="text-gray-600 text-sm mt-1">
                 {snap.amount ? `${snap.amount} ${snap.assetCode || 'XLM'}` : 'Open amount'}
               </p>
             </div>
-            <div className="flex items-center gap-2 ml-4">
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 onClick={() => copyLink(snap.id)}
-                className="text-purple-400 hover:text-purple-300 text-sm"
+                className="text-purple-600 hover:text-purple-700 text-sm font-medium"
               >
                 Copy
               </button>
@@ -96,20 +106,20 @@ export default function SnapsList({ creator, refreshKey }: Props) {
                 href={`/s/${snap.id}`}
                 target="_blank"
                 rel="noopener"
-                className="text-gray-400 hover:text-white text-sm"
+                className="text-purple-600 hover:text-purple-700 text-sm font-medium"
               >
                 View
               </a>
               <button
                 onClick={() => deleteSnap(snap.id)}
-                className="text-red-400 hover:text-red-300 text-sm"
+                className="text-red-600 hover:text-red-700 text-sm font-medium"
               >
                 Delete
               </button>
             </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }

@@ -76,69 +76,80 @@ export default function CreateSnapForm({ creator, onCreated }: Props) {
     }
   };
 
+  const inputClass =
+    'w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-gray-900 placeholder-gray-400 focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400';
+
   return (
-    <form onSubmit={handleSubmit} className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+    <form
+      onSubmit={handleSubmit}
+      className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-8"
+    >
+      {/* Title inside card – bold, dark, like reference */}
+      <h2 className="text-lg font-bold text-gray-900 mb-6">Create New Snap</h2>
+
       {/* Title */}
-      <div className="mb-4">
-        <label className="text-gray-400 text-sm mb-1 block">Title *</label>
+      <div className="mb-6">
+        <label className="text-gray-600 text-sm font-medium mb-2 block">Title *</label>
         <input
           type="text"
           value={form.title}
           onChange={(e) => setForm({ ...form, title: e.target.value })}
           placeholder="Buy me a coffee"
           required
-          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
+          className={inputClass}
         />
       </div>
 
       {/* Description */}
-      <div className="mb-4">
-        <label className="text-gray-400 text-sm mb-1 block">Description</label>
+      <div className="mb-6">
+        <label className="text-gray-600 text-sm font-medium mb-2 block">Description</label>
         <input
           type="text"
           value={form.description}
           onChange={(e) => setForm({ ...form, description: e.target.value })}
           placeholder="Support my open source work"
-          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
+          className={inputClass}
         />
       </div>
 
       {/* Destination */}
-      <div className="mb-4">
-        <label className="text-gray-400 text-sm mb-1 block">Destination Address *</label>
+      <div className="mb-6">
+        <label className="text-gray-600 text-sm font-medium mb-2 block">Destination Address *</label>
         <input
           type="text"
           value={form.destination}
           onChange={(e) => setForm({ ...form, destination: e.target.value })}
           placeholder="GABC..."
           required
-          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white font-mono text-sm focus:outline-none focus:border-purple-500"
+          className={`${inputClass} font-mono text-sm`}
         />
         <button
           type="button"
           onClick={() => setForm({ ...form, destination: creator })}
-          className="text-purple-400 text-xs mt-1 hover:underline"
+          className="text-purple-600 text-sm mt-2 hover:underline font-medium"
         >
           Use my address
         </button>
       </div>
 
       {/* Amount */}
-      <div className="mb-4">
-        <label className="text-gray-400 text-sm mb-1 block">Amount (leave empty for open amount)</label>
-        <div className="flex gap-2">
+      <div className="mb-6">
+        <label className="text-gray-600 text-sm font-medium mb-2 block">
+          Amount (leave empty for open amount)
+        </label>
+        <div className="flex gap-3">
           <input
             type="number"
             value={form.amount}
             onChange={(e) => setForm({ ...form, amount: e.target.value })}
             placeholder="10"
             step="any"
-            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
+            className={inputClass}
           />
           <select
             value={form.assetCode}
             onChange={(e) => setForm({ ...form, assetCode: e.target.value })}
-            className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500"
+            className="bg-gray-50 border border-gray-200 rounded-xl pl-3 pr-9 py-3 text-xs font-medium text-gray-900 focus:outline-none focus:border-purple-400 w-[6.5rem] min-w-[6.5rem]"
           >
             <option value="XLM">XLM</option>
             <option value="USDC">USDC</option>
@@ -147,39 +158,39 @@ export default function CreateSnapForm({ creator, onCreated }: Props) {
       </div>
 
       {/* Memo */}
-      <div className="mb-6">
-        <label className="text-gray-400 text-sm mb-1 block">Memo</label>
+      <div className="mb-8">
+        <label className="text-gray-600 text-sm font-medium mb-2 block">Memo</label>
         <input
           type="text"
           value={form.memo}
           onChange={(e) => setForm({ ...form, memo: e.target.value })}
           placeholder="Optional memo"
-          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
+          className={inputClass}
         />
       </div>
 
       {/* Error */}
       {error && (
-        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
-          <p className="text-red-400 text-sm">{error}</p>
+        <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl">
+          <p className="text-red-600 text-sm">{error}</p>
         </div>
       )}
 
       {/* Success */}
       {success && (
-        <div className="mb-4 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
-          <p className="text-green-400 text-sm mb-2">Snap created!</p>
-          <div className="flex items-center gap-2">
+        <div className="mb-6 p-4 bg-green-50 border border-green-100 rounded-xl">
+          <p className="text-green-700 text-sm font-medium mb-2">Snap created!</p>
+          <div className="flex items-center gap-3">
             <input
               type="text"
               value={success}
               readOnly
-              className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white text-xs font-mono"
+              className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-900 text-xs font-mono"
             />
             <button
               type="button"
               onClick={copyLink}
-              className="text-purple-400 text-xs hover:underline"
+              className="text-purple-600 text-sm font-medium hover:underline shrink-0"
             >
               Copy
             </button>
@@ -191,7 +202,7 @@ export default function CreateSnapForm({ creator, onCreated }: Props) {
       <button
         type="submit"
         disabled={isSubmitting}
-        className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-semibold py-3 px-4 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50"
+        className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-semibold py-3.5 px-4 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50 shadow-md"
       >
         {isSubmitting ? 'Creating...' : 'Create Snap'}
       </button>
