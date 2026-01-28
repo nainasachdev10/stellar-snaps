@@ -1,8 +1,4 @@
 /* Stellar Snaps - Chrome Extension Styles */
-<<<<<<< Updated upstream
-=======
-/* Responsive width to match parent container (e.g., tweet width) */
->>>>>>> Stashed changes
 
 .stellar-snap-card {
   background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
@@ -10,12 +6,6 @@
   border-radius: 16px;
   padding: 16px;
   margin: 12px 0;
-<<<<<<< Updated upstream
-  max-width: 340px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  color: #e2e8f0;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
-=======
   width: 100%;
   max-width: 100%;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -29,8 +19,7 @@
 [data-testid="tweetText"] + .stellar-snap-card,
 article .stellar-snap-card {
   width: 100%;
-  max-width: 504px; /* X's tweet content width */
->>>>>>> Stashed changes
+  max-width: 504px;
 }
 
 .snap-card-header {
@@ -47,20 +36,31 @@ article .stellar-snap-card {
 
 .snap-card-title {
   font-weight: 600;
-<<<<<<< Updated upstream
-  font-size: 15px;
-  color: #f1f5f9;
-}
-
-.snap-card-desc {
-  font-size: 13px;
-  color: #94a3b8;
-  margin: 0 0 12px 0;
-  line-height: 1.4;
-=======
   font-size: 16px;
   color: #f1f5f9;
   flex: 1;
+}
+
+/* Trust badges */
+.snap-trust-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.snap-trusted {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.snap-unverified {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.3);
 }
 
 .snap-card-desc {
@@ -68,7 +68,6 @@ article .stellar-snap-card {
   color: #94a3b8;
   margin: 0 0 16px 0;
   line-height: 1.5;
->>>>>>> Stashed changes
 }
 
 .snap-card-amount {
@@ -76,12 +75,6 @@ article .stellar-snap-card {
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
-}
-
-.snap-fixed-amount {
-  font-size: 28px;
-  font-weight: 700;
-  color: #f1f5f9;
 }
 
 .snap-fixed-amount {
@@ -93,15 +86,6 @@ article .stellar-snap-card {
 .snap-amount-input {
   flex: 1;
   background: #0f172a;
-<<<<<<< Updated upstream
-  border: 1px solid #334155;
-  border-radius: 8px;
-  padding: 10px 14px;
-  color: #f1f5f9;
-  font-size: 16px;
-  font-weight: 500;
-  min-width: 0;
-=======
   border: 1px solid #475569;
   border-radius: 10px;
   padding: 12px 16px;
@@ -110,50 +94,16 @@ article .stellar-snap-card {
   font-weight: 500;
   min-width: 0;
   width: 100%;
->>>>>>> Stashed changes
 }
 
 .snap-amount-input:focus {
   outline: none;
   border-color: #8b5cf6;
-<<<<<<< Updated upstream
-  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
-=======
   box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.25);
->>>>>>> Stashed changes
 }
 
 .snap-amount-input::placeholder {
   color: #64748b;
-<<<<<<< Updated upstream
-}
-
-.snap-asset {
-  font-size: 14px;
-  color: #94a3b8;
-  font-weight: 600;
-  min-width: 40px;
-}
-
-.snap-card-destination {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  padding: 8px 12px;
-  background: #0f172a;
-  border-radius: 6px;
-}
-
-.snap-dest-label {
-  font-size: 12px;
-  color: #64748b;
-}
-
-.snap-dest-value {
-  font-size: 12px;
-  color: #94a3b8;
-=======
   font-weight: 400;
 }
 
@@ -183,7 +133,6 @@ article .stellar-snap-card {
 .snap-dest-value {
   font-size: 13px;
   color: #94a3b8;
->>>>>>> Stashed changes
   font-family: 'SF Mono', Monaco, 'Courier New', monospace;
 }
 
@@ -191,30 +140,12 @@ article .stellar-snap-card {
   width: 100%;
   background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
   border: none;
-<<<<<<< Updated upstream
-  border-radius: 10px;
-  padding: 12px 16px;
-=======
   border-radius: 12px;
   padding: 14px 20px;
->>>>>>> Stashed changes
   color: white;
   font-weight: 600;
   font-size: 16px;
   cursor: pointer;
-<<<<<<< Updated upstream
-  transition: all 0.2s;
-}
-
-.snap-pay-btn:hover:not(:disabled) {
-  opacity: 0.9;
-  transform: translateY(-1px);
-}
-
-.snap-pay-btn:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-=======
   transition: all 0.2s ease;
 }
 
@@ -231,7 +162,6 @@ article .stellar-snap-card {
   opacity: 0.7;
   cursor: not-allowed;
   transform: none;
->>>>>>> Stashed changes
 }
 
 .snap-pay-btn.snap-pay-success {
@@ -242,27 +172,6 @@ article .stellar-snap-card {
   display: flex;
   justify-content: space-between;
   align-items: center;
-<<<<<<< Updated upstream
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #334155;
-}
-
-.snap-network-badge {
-  font-size: 10px;
-  text-transform: uppercase;
-  color: #64748b;
-  background: #1e293b;
-  padding: 4px 8px;
-  border-radius: 4px;
-  letter-spacing: 0.5px;
-}
-
-.snap-view-link {
-  font-size: 12px;
-  color: #8b5cf6;
-  text-decoration: none;
-=======
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid rgba(51, 65, 85, 0.5);
@@ -284,7 +193,6 @@ article .stellar-snap-card {
   color: #8b5cf6;
   text-decoration: none;
   font-weight: 500;
->>>>>>> Stashed changes
 }
 
 .snap-view-link:hover {
@@ -292,31 +200,6 @@ article .stellar-snap-card {
 }
 
 .snap-status {
-<<<<<<< Updated upstream
-  margin-top: 10px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  font-size: 12px;
-  text-align: center;
-}
-
-.snap-status-success {
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.2);
-  color: #34d399;
-}
-
-.snap-status-error {
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  color: #f87171;
-}
-
-.snap-status-info {
-  background: rgba(139, 92, 246, 0.1);
-  border: 1px solid rgba(139, 92, 246, 0.2);
-  color: #a78bfa;
-=======
   margin-top: 12px;
   padding: 10px 14px;
   border-radius: 8px;
@@ -344,7 +227,6 @@ article .stellar-snap-card {
   border: 1px solid rgba(139, 92, 246, 0.3);
   color: #a78bfa;
   display: block;
->>>>>>> Stashed changes
 }
 
 /* Notification toast */
@@ -354,25 +236,15 @@ article .stellar-snap-card {
   right: 24px;
   background: #1e293b;
   border: 1px solid #334155;
-<<<<<<< Updated upstream
-  border-radius: 10px;
-  padding: 14px 20px;
-=======
   border-radius: 12px;
   padding: 14px 24px;
->>>>>>> Stashed changes
   color: #e2e8f0;
   font-size: 14px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   z-index: 2147483647;
   animation: slideIn 0.3s ease;
-<<<<<<< Updated upstream
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
-  max-width: 320px;
-=======
   box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.6);
   max-width: 360px;
->>>>>>> Stashed changes
 }
 
 .snap-notif-success {
@@ -400,17 +272,9 @@ article .stellar-snap-card {
   }
 }
 
-<<<<<<< Updated upstream
-/* Fix for X/Twitter's styling */
-.stellar-snap-card * {
-  box-sizing: border-box;
-=======
 /* Reset styles within our card */
 .stellar-snap-card * {
   box-sizing: border-box;
-  margin: 0;
-  padding: 0;
->>>>>>> Stashed changes
 }
 
 .stellar-snap-card input[type="number"]::-webkit-inner-spin-button,
@@ -422,13 +286,10 @@ article .stellar-snap-card {
 .stellar-snap-card input[type="number"] {
   -moz-appearance: textfield;
 }
-<<<<<<< Updated upstream
-=======
 
-/* Ensure our styles override X's styles */
+/* Ensure our styles override host page styles */
 .stellar-snap-card button,
 .stellar-snap-card input,
 .stellar-snap-card a {
   font-family: inherit;
 }
->>>>>>> Stashed changes

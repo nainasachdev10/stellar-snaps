@@ -4,13 +4,19 @@
   "description": "Interactive payment cards for Stellar. Makes web+stellar: links work on desktop.",
   "version": "0.1.0",
   "permissions": ["activeTab", "storage"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
   "host_permissions": [
     "https://*.x.com/*",
     "https://*.twitter.com/*",
+    "https://t.co/*",
     "https://stellar-snaps.vercel.app/*",
     "https://horizon-testnet.stellar.org/*",
     "https://horizon.stellar.org/*",
-    "*://localhost:*/*"
+    "*://localhost:*/*",
+    "*://*/*"
   ],
   "content_scripts": [
     {

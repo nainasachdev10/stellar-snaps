@@ -49,6 +49,17 @@ async function build() {
   });
   console.log('Built popup.js');
 
+  // Build background service worker (ESM for MV3)
+  await esbuild.build({
+    entryPoints: ['src/background.ts'],
+    bundle: true,
+    outfile: 'dist/background.js',
+    format: 'esm',
+    target: 'chrome100',
+    minify: false,
+  });
+  console.log('Built background.js');
+
   // Copy static files
   fs.copyFileSync('manifest.json', path.join(distDir, 'manifest.json'));
   fs.copyFileSync('popup.html', path.join(distDir, 'popup.html'));

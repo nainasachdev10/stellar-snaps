@@ -1,16 +1,17 @@
 /**
- * Content script - runs in ISOLATED world
-<<<<<<< Updated upstream
- * 1. Injects script into main world to access Freighter
- * 2. Detects stellar-snaps URLs -> renders interactive cards
- * 3. Intercepts web+stellar: links -> calls wallet API via injected script
-=======
- * Optimized for X/Twitter SPA navigation and feed detection
->>>>>>> Stashed changes
+ * Content script - Dialect-inspired architecture
+ * 
+ * Flow:
+ * 1. Scan page for ALL links
+ * 2. Resolve shortened URLs via /api/proxy
+ * 3. Check if domain is in registry
+ * 4. Fetch /.well-known/stellar-snap.json from domain
+ * 5. Match URL path against rules
+ * 6. Fetch snap metadata & render with trust badge
  */
 
-const SNAP_URL_REGEX = /stellar-snaps\.vercel\.app\/s\/([a-zA-Z0-9_-]+)/;
-const SNAP_URL_REGEX_LOCALHOST = /localhost:3000\/s\/([a-zA-Z0-9_-]+)/;
+const PROXY_URL = 'https://stellar-snaps.vercel.app/api/proxy';
+const REGISTRY_URL = 'https://stellar-snaps.vercel.app/api/registry';
 
 const NETWORK_PASSPHRASES = {
   testnet: 'Test SDF Network ; September 2015',
@@ -21,6 +22,22 @@ const HORIZON_URLS = {
   testnet: 'https://horizon-testnet.stellar.org',
   public: 'https://horizon.stellar.org',
 };
+
+interface RegistryEntry {
+  domain: string;
+  status: 'trusted' | 'unverified' | 'blocked';
+  name?: string;
+}
+
+interface DiscoveryFile {
+  name: string;
+  description?: string;
+  icon?: string;
+  rules: Array<{
+    pathPattern: string;
+    apiPath: string;
+  }>;
+}
 
 interface SnapMetadata {
   id: string;
@@ -35,33 +52,456 @@ interface SnapMetadata {
   network?: string;
 }
 
-<<<<<<< Updated upstream
-// Pending Freighter requests
-const pendingRequests = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void }>();
-let injectedReady = false;
+// Caches
+let registryCache: Map<string, RegistryEntry> = new Map();
+let discoveryCache: Map<string, DiscoveryFile> = new Map();
+const resolveCache: Map<string, { url: string; domain: string }> = new Map();
+const processedLinks: WeakSet<Element> = new WeakSet();
+const renderedSnaps: Set<string> = new Set();
+const pendingUrls: Set<string> = new Set();
 
-// Track processed elements to avoid duplicates
-const processedElements = new WeakSet<Element>();
-=======
 // Freighter bridge
 const pendingRequests = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void }>();
 let injectedReady = false;
 
-// Deduplication - track both elements AND snap IDs to prevent duplicates
-const processedElements = new WeakSet<Element>();
-const renderedSnapIds = new Set<string>(); // Track which snaps have cards on current page
-const pendingFetches = new Set<string>(); // Prevent parallel fetches for same snap
-const pendingResolves = new Set<string>();
-const resolveCache = new Map<string, string>(); // t.co -> resolved URL cache
-
-// Debounce scan
+// Debounce
 let scanTimeout: number | null = null;
-const SCAN_DEBOUNCE_MS = 200;
+const SCAN_DEBOUNCE_MS = 300;
 
-// SPA navigation tracking
-let lastUrl = location.href;
-let urlCheckInterval: number | null = null;
->>>>>>> Stashed changes
+// ============ INITIALIZATION ============
+
+function init() {
+  console.log('[Stellar Snaps] Initializing...');
+  
+  // Inject Freighter bridge
+  injectScript();
+  
+  // Load registry on startup
+  loadRegistry();
+  
+  // Initial scan after short delay
+  setTimeout(() => scheduleScan(), 500);
+  
+  // Watch for DOM changes
+  const observer = new MutationObserver((mutations) => {
+    const hasNewNodes = mutations.some(m => m.addedNodes.length > 0);
+    if (hasNewNodes) scheduleScan();
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  
+  // Handle link clicks for web+stellar:
+  document.addEventListener('click', handleLinkClick, true);
+  
+  // SPA navigation detection
+  let lastUrl = location.href;
+  const checkNavigation = () => {
+    if (location.href !== lastUrl) {
+      lastUrl = location.href;
+      renderedSnaps.clear();
+      scheduleScan();
+    }
+  };
+  
+  // History API intercept
+  const originalPushState = history.pushState;
+  const originalReplaceState = history.replaceState;
+  history.pushState = function(...args) {
+    originalPushState.apply(this, args);
+    setTimeout(checkNavigation, 100);
+  };
+  history.replaceState = function(...args) {
+    originalReplaceState.apply(this, args);
+    setTimeout(checkNavigation, 100);
+  };
+  window.addEventListener('popstate', checkNavigation);
+  
+  // Scroll detection for lazy-loaded content
+  let scrollTicking = false;
+  window.addEventListener('scroll', () => {
+    if (!scrollTicking) {
+      requestAnimationFrame(() => {
+        scheduleScan();
+        scrollTicking = false;
+      });
+      scrollTicking = true;
+    }
+  }, { passive: true });
+}
+
+// ============ REGISTRY ============
+
+async function loadRegistry(): Promise<void> {
+  try {
+    // Check chrome.storage first
+    const stored = await chrome.storage.local.get('registry');
+    if (stored.registry && Date.now() - stored.registry.timestamp < 5 * 60 * 1000) {
+      registryCache = new Map(stored.registry.entries);
+      console.log('[Stellar Snaps] Registry loaded from cache:', registryCache.size, 'domains');
+      return;
+    }
+    
+    // Fetch fresh registry
+    const response = await fetch(REGISTRY_URL);
+    if (!response.ok) throw new Error('Failed to fetch registry');
+    
+    const data = await response.json();
+    registryCache = new Map(data.domains.map((e: RegistryEntry) => [e.domain, e]));
+    
+    // Persist to storage
+    await chrome.storage.local.set({
+      registry: {
+        entries: Array.from(registryCache.entries()),
+        timestamp: Date.now(),
+      },
+    });
+    
+    console.log('[Stellar Snaps] Registry fetched:', registryCache.size, 'domains');
+  } catch (err) {
+    console.error('[Stellar Snaps] Failed to load registry:', err);
+    // Fallback: trust our own domain
+    registryCache.set('stellar-snaps.vercel.app', {
+      domain: 'stellar-snaps.vercel.app',
+      status: 'trusted',
+      name: 'Stellar Snaps',
+    });
+  }
+}
+
+function checkRegistry(domain: string): RegistryEntry | null {
+  return registryCache.get(domain) || null;
+}
+
+// ============ DISCOVERY FILE ============
+
+async function fetchDiscoveryFile(domain: string): Promise<DiscoveryFile | null> {
+  // Check cache
+  if (discoveryCache.has(domain)) {
+    return discoveryCache.get(domain)!;
+  }
+  
+  try {
+    const protocol = domain.includes('localhost') ? 'http' : 'https';
+    const response = await fetch(`${protocol}://${domain}/.well-known/stellar-snap.json`);
+    if (!response.ok) return null;
+    
+    const discovery: DiscoveryFile = await response.json();
+    discoveryCache.set(domain, discovery);
+    return discovery;
+  } catch (err) {
+    console.error('[Stellar Snaps] Failed to fetch discovery file:', domain, err);
+    return null;
+  }
+}
+
+function matchPathToRule(path: string, rules: DiscoveryFile['rules']): string | null {
+  for (const rule of rules) {
+    // Convert pathPattern to regex (e.g., "/s/*" -> /^\/s\/(.+)$/)
+    const pattern = rule.pathPattern
+      .replace(/\*/g, '(.+)')
+      .replace(/\//g, '\\/');
+    const regex = new RegExp(`^${pattern}$`);
+    const match = path.match(regex);
+    
+    if (match) {
+      // Replace * in apiPath with captured group
+      let apiPath = rule.apiPath;
+      match.slice(1).forEach((group, i) => {
+        apiPath = apiPath.replace('*', group);
+      });
+      return apiPath;
+    }
+  }
+  return null;
+}
+
+// ============ SCANNING ============
+
+function scheduleScan() {
+  if (scanTimeout) clearTimeout(scanTimeout);
+  scanTimeout = window.setTimeout(() => {
+    scanTimeout = null;
+    scanForLinks();
+  }, SCAN_DEBOUNCE_MS);
+}
+
+async function scanForLinks() {
+  // Find all links on page
+  const links = document.querySelectorAll('a[href]');
+  
+  for (const link of links) {
+    if (processedLinks.has(link)) continue;
+    if (link.closest('.stellar-snap-card')) continue;
+    
+    const href = link.getAttribute('href');
+    if (!href) continue;
+    
+    // Skip obviously non-http links
+    if (href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:')) {
+      continue;
+    }
+    
+    processedLinks.add(link);
+    processLink(link as HTMLAnchorElement, href);
+  }
+}
+
+async function processLink(linkElement: HTMLAnchorElement, href: string) {
+  // Prevent duplicate processing
+  if (pendingUrls.has(href)) return;
+  pendingUrls.add(href);
+  
+  try {
+    // Step 1: Resolve URL (handles t.co, bit.ly, etc.)
+    const resolved = await resolveUrl(href);
+    if (!resolved) return;
+    
+    const { url: finalUrl, domain } = resolved;
+    
+    // Step 2: Check registry
+    const registryEntry = checkRegistry(domain);
+    if (!registryEntry) {
+      // Domain not in registry - skip silently
+      return;
+    }
+    
+    if (registryEntry.status === 'blocked') {
+      console.warn('[Stellar Snaps] Blocked domain:', domain);
+      return;
+    }
+    
+    // Step 3: Fetch discovery file
+    const discovery = await fetchDiscoveryFile(domain);
+    if (!discovery) {
+      console.log('[Stellar Snaps] No discovery file for:', domain);
+      return;
+    }
+    
+    // Step 4: Match URL path against rules
+    const parsedUrl = new URL(finalUrl);
+    const apiPath = matchPathToRule(parsedUrl.pathname, discovery.rules);
+    if (!apiPath) {
+      console.log('[Stellar Snaps] No matching rule for:', parsedUrl.pathname);
+      return;
+    }
+    
+    // Step 5: Fetch snap metadata
+    const protocol = domain.includes('localhost') ? 'http' : 'https';
+    const metadataUrl = `${protocol}://${domain}${apiPath}`;
+    
+    // Extract snap ID from path for dedup
+    const snapId = parsedUrl.pathname.split('/').pop() || '';
+    if (renderedSnaps.has(snapId)) return;
+    
+    console.log('[Stellar Snaps] Fetching metadata:', metadataUrl);
+    const metadataResponse = await fetch(metadataUrl);
+    if (!metadataResponse.ok) return;
+    
+    const metadata: SnapMetadata = await metadataResponse.json();
+    
+    // Double-check dedup after async
+    if (renderedSnaps.has(metadata.id)) return;
+    if (document.querySelector(`.stellar-snap-card[data-snap-id="${metadata.id}"]`)) {
+      renderedSnaps.add(metadata.id);
+      return;
+    }
+    
+    // Step 6: Render card with trust badge
+    renderCard(linkElement, metadata, finalUrl, registryEntry);
+    renderedSnaps.add(metadata.id);
+    
+  } catch (err) {
+    console.error('[Stellar Snaps] Error processing link:', href, err);
+  } finally {
+    pendingUrls.delete(href);
+  }
+}
+
+async function resolveUrl(url: string): Promise<{ url: string; domain: string } | null> {
+  // Check if URL needs resolution (shortened URLs)
+  const shortenedDomains = ['t.co', 'bit.ly', 'goo.gl', 'tinyurl.com', 'ow.ly', 'is.gd', 'buff.ly'];
+  
+  let urlToCheck: URL;
+  try {
+    // Handle relative URLs
+    urlToCheck = new URL(url, window.location.origin);
+  } catch {
+    return null;
+  }
+  
+  const needsResolve = shortenedDomains.some(d => urlToCheck.host.includes(d));
+  
+  if (!needsResolve) {
+    // Direct URL - check if domain is in registry
+    return { url: urlToCheck.href, domain: urlToCheck.host };
+  }
+  
+  // Check cache
+  if (resolveCache.has(url)) {
+    return resolveCache.get(url)!;
+  }
+  
+  // Resolve via proxy
+  try {
+    const response = await fetch(`${PROXY_URL}?url=${encodeURIComponent(url)}`);
+    if (!response.ok) return null;
+    
+    const data = await response.json();
+    const result = { url: data.url, domain: data.domain };
+    resolveCache.set(url, result);
+    return result;
+  } catch (err) {
+    console.error('[Stellar Snaps] Proxy resolution failed:', url, err);
+    return null;
+  }
+}
+
+// ============ RENDERING ============
+
+function renderCard(
+  linkElement: HTMLElement,
+  metadata: SnapMetadata,
+  originalHref: string,
+  registryEntry: RegistryEntry
+) {
+  // Final safety check
+  if (document.querySelector(`.stellar-snap-card[data-snap-id="${metadata.id}"]`)) return;
+
+  const card = document.createElement('div');
+  card.className = 'stellar-snap-card';
+  card.setAttribute('data-snap-id', metadata.id);
+
+  const hasFixedAmount = !!metadata.amount;
+  const network = metadata.network || 'testnet';
+  const trustBadge = registryEntry.status === 'trusted' 
+    ? '<span class="snap-trust-badge snap-trusted">Verified</span>'
+    : '<span class="snap-trust-badge snap-unverified">Unverified</span>';
+
+  card.innerHTML = `
+    <div class="snap-card-header">
+      <span class="snap-card-logo">✦</span>
+      <span class="snap-card-title">${escapeHtml(metadata.title)}</span>
+      ${trustBadge}
+    </div>
+    ${metadata.description ? `<p class="snap-card-desc">${escapeHtml(metadata.description)}</p>` : ''}
+    <div class="snap-card-amount">
+      ${hasFixedAmount
+        ? `<span class="snap-fixed-amount">${metadata.amount}</span>`
+        : '<input type="number" placeholder="Enter amount" class="snap-amount-input" step="any" min="0" />'}
+      <span class="snap-asset">${metadata.assetCode || 'XLM'}</span>
+    </div>
+    <div class="snap-card-destination">
+      <span class="snap-dest-label">To:</span>
+      <span class="snap-dest-value">${metadata.destination.slice(0, 6)}...${metadata.destination.slice(-4)}</span>
+    </div>
+    <button class="snap-pay-btn">Pay with Stellar</button>
+    <div class="snap-card-footer">
+      <span class="snap-network-badge">${network}</span>
+      <a href="${originalHref}" target="_blank" class="snap-view-link">View</a>
+    </div>
+    <div class="snap-status"></div>
+  `;
+
+  linkElement.parentNode?.insertBefore(card, linkElement.nextSibling);
+  setupPayButton(card, metadata, originalHref, network);
+}
+
+// ============ PAYMENT HANDLING ============
+
+function setupPayButton(card: HTMLElement, metadata: SnapMetadata, originalHref: string, network: string) {
+  const payBtn = card.querySelector('.snap-pay-btn') as HTMLButtonElement;
+  const statusEl = card.querySelector('.snap-status') as HTMLDivElement;
+
+  payBtn?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const amountInput = card.querySelector('.snap-amount-input') as HTMLInputElement;
+    const amount = amountInput?.value || metadata.amount;
+
+    if (!amount || parseFloat(amount) <= 0) {
+      showStatus(statusEl, 'Enter a valid amount', 'error');
+      return;
+    }
+
+    payBtn.disabled = true;
+    payBtn.textContent = 'Connecting...';
+    showStatus(statusEl, '', '');
+
+    try {
+      const { isConnected } = await callFreighter('isConnected');
+      if (!isConnected) throw new Error('Connect Freighter first');
+
+      const { isAllowed } = await callFreighter('isAllowed');
+      if (!isAllowed) await callFreighter('setAllowed');
+
+      const { address } = await callFreighter('getAddress');
+      if (!address) throw new Error('Connect wallet in Freighter');
+
+      const networkPassphrase = NETWORK_PASSPHRASES[network as keyof typeof NETWORK_PASSPHRASES];
+      const { networkPassphrase: currentNetwork } = await callFreighter('getNetwork');
+      if (currentNetwork !== networkPassphrase) throw new Error(`Switch Freighter to ${network}`);
+
+      payBtn.textContent = 'Building...';
+
+      const horizonUrl = HORIZON_URLS[network as keyof typeof HORIZON_URLS];
+      const accountRes = await fetch(`${horizonUrl}/accounts/${address}`);
+      if (!accountRes.ok) throw new Error(accountRes.status === 404 ? 'Account not funded' : 'Failed to load account');
+
+      const account = await accountRes.json();
+      
+      // Determine base URL from original href
+      let baseUrl = 'https://stellar-snaps.vercel.app';
+      try {
+        const parsed = new URL(originalHref);
+        baseUrl = `${parsed.protocol}//${parsed.host}`;
+      } catch {}
+
+      const buildRes = await fetch(`${baseUrl}/api/build-tx`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: address,
+          sequence: account.sequence,
+          destination: metadata.destination,
+          amount,
+          assetCode: metadata.assetCode,
+          assetIssuer: metadata.assetIssuer,
+          memo: metadata.memo,
+          memoType: metadata.memoType,
+          network,
+        }),
+      });
+
+      if (!buildRes.ok) throw new Error('Failed to build tx');
+      const { xdr } = await buildRes.json();
+
+      payBtn.textContent = 'Sign...';
+      const { signedTxXdr } = await callFreighter('signTransaction', { xdr, networkPassphrase });
+
+      payBtn.textContent = 'Submitting...';
+      const submitRes = await fetch(`${horizonUrl}/transactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `tx=${encodeURIComponent(signedTxXdr)}`,
+      });
+
+      const result = await submitRes.json();
+      if (submitRes.ok) {
+        payBtn.textContent = 'Paid!';
+        payBtn.className = 'snap-pay-btn snap-pay-success';
+        showStatus(statusEl, `TX: ${result.hash.slice(0, 8)}...`, 'success');
+      } else {
+        throw new Error(result?.extras?.result_codes?.transaction || 'Failed');
+      }
+    } catch (err: any) {
+      payBtn.disabled = false;
+      payBtn.textContent = 'Try Again';
+      showStatus(statusEl, err?.message || 'Payment failed', 'error');
+    }
+  });
+}
+
+// ============ FREIGHTER BRIDGE ============
 
 function generateId(): string {
   return Math.random().toString(36).substring(2) + Date.now().toString(36);
@@ -99,10 +539,7 @@ window.addEventListener('message', (event) => {
 
   if (event.data.ready) {
     injectedReady = true;
-<<<<<<< Updated upstream
     console.log('[Stellar Snaps] Freighter bridge ready');
-=======
->>>>>>> Stashed changes
     return;
   }
 
@@ -128,102 +565,7 @@ function injectScript() {
   (document.head || document.documentElement).appendChild(script);
 }
 
-function init() {
-<<<<<<< Updated upstream
-  console.log('[Stellar Snaps] Content script initializing');
-  injectScript();
-  document.addEventListener('click', handleLinkClick, true);
-  
-  // Initial scan with delay
-  setTimeout(() => scanForSnapUrls(), 1000);
-
-  // Re-scan on DOM changes (for SPAs like X)
-  const observer = new MutationObserver((mutations) => {
-    // Debounce: only scan if there are actual node additions
-    const hasNewNodes = mutations.some(m => m.addedNodes.length > 0);
-    if (hasNewNodes) {
-      scanForSnapUrls();
-=======
-  injectScript();
-  document.addEventListener('click', handleLinkClick, true);
-  
-  // Initial scan
-  scheduleScan();
-
-  // Watch for DOM changes with debouncing
-  const observer = new MutationObserver((mutations) => {
-    // Check if any mutations added nodes (not just attribute changes)
-    const hasNewNodes = mutations.some(m => m.addedNodes.length > 0);
-    if (hasNewNodes) {
-      scheduleScan();
->>>>>>> Stashed changes
-    }
-  });
-  observer.observe(document.body, { childList: true, subtree: true });
-
-  // SPA navigation detection - X/Twitter uses History API
-  // Method 1: Listen for popstate (back/forward buttons)
-  window.addEventListener('popstate', () => {
-    console.log('[Stellar Snaps] popstate detected');
-    scheduleScan();
-  });
-
-  // Method 2: Poll for URL changes (catches pushState/replaceState)
-  urlCheckInterval = window.setInterval(() => {
-    if (location.href !== lastUrl) {
-      console.log('[Stellar Snaps] URL changed:', lastUrl, '->', location.href);
-      lastUrl = location.href;
-      // Clear rendered IDs on navigation - new page may have same snap
-      renderedSnapIds.clear();
-      // Small delay to let new content render
-      setTimeout(() => scheduleScan(), 100);
-    }
-  }, 500);
-
-  // Method 3: Intercept History API (most reliable for SPAs)
-  const originalPushState = history.pushState;
-  const originalReplaceState = history.replaceState;
-  
-  history.pushState = function(...args) {
-    originalPushState.apply(this, args);
-    console.log('[Stellar Snaps] pushState detected');
-    setTimeout(() => scheduleScan(), 100);
-  };
-  
-  history.replaceState = function(...args) {
-    originalReplaceState.apply(this, args);
-    console.log('[Stellar Snaps] replaceState detected');
-    setTimeout(() => scheduleScan(), 100);
-  };
-
-  // Also scan on scroll (for virtual scrolling like X uses)
-  let lastScrollY = 0;
-  let scrollTicking = false;
-  window.addEventListener('scroll', () => {
-    if (!scrollTicking) {
-      requestAnimationFrame(() => {
-        if (Math.abs(window.scrollY - lastScrollY) > 300) {
-          lastScrollY = window.scrollY;
-          scheduleScan();
-        }
-        scrollTicking = false;
-      });
-      scrollTicking = true;
-    }
-  }, { passive: true });
-
-  console.log('[Stellar Snaps] Content script initialized');
-}
-
-function scheduleScan() {
-  if (scanTimeout) {
-    clearTimeout(scanTimeout);
-  }
-  scanTimeout = window.setTimeout(() => {
-    scanTimeout = null;
-    scanForSnapUrls();
-  }, SCAN_DEBOUNCE_MS);
-}
+// ============ UTILITIES ============
 
 function handleLinkClick(e: MouseEvent) {
   const target = e.target as HTMLElement;
@@ -241,606 +583,19 @@ function handleLinkClick(e: MouseEvent) {
   }
 }
 
-<<<<<<< Updated upstream
-async function handleStellarUri(uri: string) {
-  try {
-    const { isConnected } = await callFreighter('isConnected');
-    if (!isConnected) {
-      showNotification('Please connect Freighter wallet first', 'error');
-      return;
-    }
-    showNotification('Processing payment request...', 'info');
-  } catch (err: any) {
-    showNotification(err?.message || 'Freighter error', 'error');
-  }
-}
-
-/**
- * Extract snap ID from text content or URL
- */
-function extractSnapId(text: string): { id: string; isLocalhost: boolean } | null {
-  let match = text.match(SNAP_URL_REGEX);
-  if (match) {
-    return { id: match[1], isLocalhost: false };
-  }
-  
-  match = text.match(SNAP_URL_REGEX_LOCALHOST);
-  if (match) {
-    return { id: match[1], isLocalhost: true };
-  }
-=======
-function extractSnapId(text: string): { id: string; isLocalhost: boolean } | null {
-  let match = text.match(SNAP_URL_REGEX);
-  if (match) return { id: match[1], isLocalhost: false };
-  
-  match = text.match(SNAP_URL_REGEX_LOCALHOST);
-  if (match) return { id: match[1], isLocalhost: true };
->>>>>>> Stashed changes
-  
-  return null;
-}
-
-function scanForSnapUrls() {
-  const isX = window.location.hostname.includes('x.com') || window.location.hostname.includes('twitter.com');
-  
-<<<<<<< Updated upstream
-  // Method 1: Direct href matching (works on most sites)
-  const directLinks = document.querySelectorAll(
-    'a[href*="stellar-snaps.vercel.app/s/"], a[href*="localhost:3000/s/"]'
-  );
-  
-  directLinks.forEach((link) => {
-    if (processedElements.has(link)) return;
-    processedElements.add(link);
-    
-    const href = link.getAttribute('href') || '';
-    const snapInfo = extractSnapId(href);
-    if (snapInfo) {
-      console.log('[Stellar Snaps] Found direct link:', snapInfo.id);
-=======
-  // Method 1: Direct href matching
-  document.querySelectorAll('a[href*="stellar-snaps.vercel.app/s/"], a[href*="localhost:3000/s/"]').forEach((link) => {
-    // Skip if inside our own card
-    if (link.closest('.stellar-snap-card')) return;
-    if (processedElements.has(link)) return;
-    
-    const href = link.getAttribute('href') || '';
-    const snapInfo = extractSnapId(href);
-    if (snapInfo && !renderedSnapIds.has(snapInfo.id)) {
-      processedElements.add(link);
->>>>>>> Stashed changes
-      const fullUrl = snapInfo.isLocalhost 
-        ? `http://localhost:3000/s/${snapInfo.id}`
-        : `https://stellar-snaps.vercel.app/s/${snapInfo.id}`;
-      fetchAndRenderCard(link as HTMLElement, snapInfo.id, fullUrl);
-    }
-  });
-
-<<<<<<< Updated upstream
-  // Method 2: Check link text for our URL
-  const allLinks = document.querySelectorAll('a');
-  allLinks.forEach((link) => {
-    if (processedElements.has(link)) return;
-    
-    const text = link.textContent || '';
-    const href = link.getAttribute('href') || '';
-    const snapInfo = extractSnapId(text) || extractSnapId(href);
-    
-    if (snapInfo) {
-      processedElements.add(link);
-      console.log('[Stellar Snaps] Found link:', snapInfo.id);
-      const fullUrl = snapInfo.isLocalhost 
-        ? `http://localhost:3000/s/${snapInfo.id}`
-        : `https://stellar-snaps.vercel.app/s/${snapInfo.id}`;
-=======
-  // Method 2: Check link text (skip if we already found via href)
-  document.querySelectorAll('a').forEach((link) => {
-    if (link.closest('.stellar-snap-card')) return;
-    if (processedElements.has(link)) return;
-    
-    const text = link.textContent || '';
-    const snapInfo = extractSnapId(text);
-    if (snapInfo && !renderedSnapIds.has(snapInfo.id)) {
-      processedElements.add(link);
-      const fullUrl = `https://stellar-snaps.vercel.app/s/${snapInfo.id}`;
->>>>>>> Stashed changes
-      fetchAndRenderCard(link as HTMLElement, snapInfo.id, fullUrl);
-    }
-  });
-
-<<<<<<< Updated upstream
-  // Method 3: X/Twitter specific - find cards showing our domain and resolve t.co links
-  if (isX) {
-    // Find elements that mention our domain (even truncated)
-    const cardWrappers = document.querySelectorAll('[data-testid="card.wrapper"]');
-    
-    cardWrappers.forEach((card) => {
-=======
-  // Method 3: X/Twitter cards with t.co links
-  if (isX) {
-    document.querySelectorAll('[data-testid="card.wrapper"]').forEach((card) => {
-      if (card.closest('.stellar-snap-card')) return;
->>>>>>> Stashed changes
-      if (processedElements.has(card)) return;
-      
-      const cardText = card.textContent || '';
-      
-<<<<<<< Updated upstream
-      // Check if this card is for our domain (X truncates to just domain)
-      if (cardText.includes('stellar-snaps.vercel.app') || cardText.includes('stellar-snaps')) {
-        console.log('[Stellar Snaps] Found X card for our domain');
-        processedElements.add(card);
-        
-        // Find the t.co link in this card
-        const tcoLink = card.querySelector('a[href*="t.co"]') as HTMLAnchorElement;
-        if (tcoLink) {
-          const tcoUrl = tcoLink.getAttribute('href');
-          if (tcoUrl) {
-            console.log('[Stellar Snaps] Resolving t.co link:', tcoUrl);
-=======
-      if (cardText.includes('stellar-snaps')) {
-        const tcoLink = card.querySelector('a[href*="t.co"]') as HTMLAnchorElement;
-        if (tcoLink) {
-          const tcoUrl = tcoLink.getAttribute('href');
-          if (tcoUrl && !pendingResolves.has(tcoUrl)) {
-            processedElements.add(card);
->>>>>>> Stashed changes
-            resolveTcoAndRender(tcoUrl, card as HTMLElement);
-          }
-        }
-      }
-    });
-
-<<<<<<< Updated upstream
-    // Also check for links with our domain shown in text (even without full path)
-    allLinks.forEach((link) => {
-      if (processedElements.has(link)) return;
-      
-      const text = link.textContent || '';
-      const href = link.getAttribute('href') || '';
-      
-      // If text shows our domain but we don't have the snap ID, resolve the t.co
-      if ((text.includes('stellar-snaps.vercel.app') || text.includes('stellar-snaps')) 
-          && !extractSnapId(text) 
-          && href.includes('t.co')) {
-        console.log('[Stellar Snaps] Found truncated URL, resolving:', href);
-        processedElements.add(link);
-        resolveTcoAndRender(href, link as HTMLElement);
-=======
-    // Method 4: X/Twitter tweet text containing snap URLs (for when link preview doesn't show)
-    document.querySelectorAll('[data-testid="tweetText"]').forEach((tweetText) => {
-      if (tweetText.closest('.stellar-snap-card')) return;
-      if (processedElements.has(tweetText)) return;
-      
-      const text = tweetText.textContent || '';
-      const snapInfo = extractSnapId(text);
-      if (snapInfo && !renderedSnapIds.has(snapInfo.id)) {
-        // Find the t.co link within this tweet
-        const tcoLink = tweetText.querySelector('a[href*="t.co"]') as HTMLAnchorElement;
-        if (tcoLink) {
-          const tcoUrl = tcoLink.getAttribute('href');
-          if (tcoUrl && !pendingResolves.has(tcoUrl)) {
-            processedElements.add(tweetText);
-            resolveTcoAndRender(tcoUrl, tweetText as HTMLElement);
-          }
-        }
->>>>>>> Stashed changes
-      }
-    });
-  }
-}
-
-<<<<<<< Updated upstream
-// Resolve t.co shortened URL via our server (CORS blocks direct fetch)
-async function resolveTcoAndRender(tcoUrl: string, element: HTMLElement) {
-  try {
-    // Use our API to resolve the t.co URL (avoids CORS issues)
-=======
-async function resolveTcoAndRender(tcoUrl: string, element: HTMLElement) {
-  // Check cache first
-  if (resolveCache.has(tcoUrl)) {
-    const cachedUrl = resolveCache.get(tcoUrl)!;
-    const snapInfo = extractSnapId(cachedUrl);
-    if (snapInfo && !renderedSnapIds.has(snapInfo.id)) {
-      fetchAndRenderCard(element, snapInfo.id, cachedUrl);
-    }
-    return;
-  }
-
-  pendingResolves.add(tcoUrl);
-
-  try {
->>>>>>> Stashed changes
-    const response = await fetch(
-      `https://stellar-snaps.vercel.app/api/resolve?url=${encodeURIComponent(tcoUrl)}`
-    );
-    
-<<<<<<< Updated upstream
-    if (!response.ok) {
-      console.error('[Stellar Snaps] Resolve API error:', response.status);
-      return;
-    }
-=======
-    if (!response.ok) return;
->>>>>>> Stashed changes
-    
-    const data = await response.json();
-    const finalUrl = data.url;
-    
-<<<<<<< Updated upstream
-    console.log('[Stellar Snaps] Resolved to:', finalUrl);
-    
-    const snapInfo = extractSnapId(finalUrl);
-    if (snapInfo) {
-      console.log('[Stellar Snaps] Found snap ID:', snapInfo.id);
-      fetchAndRenderCard(element, snapInfo.id, finalUrl);
-    } else {
-      console.log('[Stellar Snaps] No snap ID in resolved URL');
-    }
-  } catch (err) {
-    console.error('[Stellar Snaps] Failed to resolve t.co:', err);
-=======
-    // Cache the result
-    resolveCache.set(tcoUrl, finalUrl);
-    
-    const snapInfo = extractSnapId(finalUrl);
-    if (snapInfo && !renderedSnapIds.has(snapInfo.id)) {
-      fetchAndRenderCard(element, snapInfo.id, finalUrl);
-    }
-  } catch (err) {
-    console.error('[Stellar Snaps] Resolve failed:', err);
-  } finally {
-    pendingResolves.delete(tcoUrl);
->>>>>>> Stashed changes
-  }
-}
-
-async function fetchAndRenderCard(linkElement: HTMLElement, snapId: string, originalHref: string) {
-<<<<<<< Updated upstream
-=======
-  // Multiple layers of deduplication
-  if (renderedSnapIds.has(snapId)) return;
-  if (pendingFetches.has(snapId)) return;
-  if (document.querySelector(`.stellar-snap-card[data-snap-id="${snapId}"]`)) {
-    renderedSnapIds.add(snapId);
-    return;
-  }
-
-  pendingFetches.add(snapId);
-
->>>>>>> Stashed changes
-  try {
-    const isLocalhost = originalHref.includes('localhost');
-    const baseUrl = isLocalhost ? 'http://localhost:3000' : 'https://stellar-snaps.vercel.app';
-
-<<<<<<< Updated upstream
-    console.log('[Stellar Snaps] Fetching metadata for:', snapId);
-    const response = await fetch(`${baseUrl}/api/metadata/${snapId}`);
-    if (!response.ok) {
-      console.log('[Stellar Snaps] Metadata fetch failed:', response.status);
-=======
-    const response = await fetch(`${baseUrl}/api/metadata/${snapId}`);
-    if (!response.ok) {
-      return;
-    }
-
-    // Double-check before rendering (another request might have completed)
-    if (renderedSnapIds.has(snapId)) return;
-    if (document.querySelector(`.stellar-snap-card[data-snap-id="${snapId}"]`)) {
-      renderedSnapIds.add(snapId);
->>>>>>> Stashed changes
-      return;
-    }
-
-    const metadata: SnapMetadata = await response.json();
-<<<<<<< Updated upstream
-    console.log('[Stellar Snaps] Got metadata:', metadata.title);
-    renderCard(linkElement, metadata, originalHref);
-  } catch (err) {
-    console.error('[Stellar Snaps] Failed to fetch metadata:', err);
-=======
-    renderCard(linkElement, metadata, originalHref);
-    renderedSnapIds.add(snapId);
-  } catch (err) {
-    console.error('[Stellar Snaps] Failed to fetch metadata:', err);
-  } finally {
-    pendingFetches.delete(snapId);
->>>>>>> Stashed changes
-  }
-}
-
-function renderCard(linkElement: HTMLElement, metadata: SnapMetadata, originalHref: string) {
-<<<<<<< Updated upstream
-  // Check if card already exists nearby
-  const existingCard = linkElement.parentElement?.querySelector('.stellar-snap-card');
-  if (existingCard) {
-    console.log('[Stellar Snaps] Card already exists, skipping');
-    return;
-  }
-
-  const card = document.createElement('div');
-  card.className = 'stellar-snap-card';
-=======
-  // Final safety check - don't render if card already exists
-  if (document.querySelector(`.stellar-snap-card[data-snap-id="${metadata.id}"]`)) return;
-
-  const card = document.createElement('div');
-  card.className = 'stellar-snap-card';
-  card.setAttribute('data-snap-id', metadata.id);
->>>>>>> Stashed changes
-
-  const hasFixedAmount = !!metadata.amount;
-  const network = metadata.network || 'testnet';
-
-  card.innerHTML = `
-    <div class="snap-card-header">
-      <span class="snap-card-logo">✦</span>
-      <span class="snap-card-title">${escapeHtml(metadata.title)}</span>
-    </div>
-    ${metadata.description ? `<p class="snap-card-desc">${escapeHtml(metadata.description)}</p>` : ''}
-    <div class="snap-card-amount">
-<<<<<<< Updated upstream
-      ${
-        hasFixedAmount
-          ? `<span class="snap-fixed-amount">${metadata.amount}</span>`
-          : '<input type="number" placeholder="Amount" class="snap-amount-input" step="any" min="0" />'
-      }
-=======
-      ${hasFixedAmount
-        ? `<span class="snap-fixed-amount">${metadata.amount}</span>`
-        : '<input type="number" placeholder="Enter amount" class="snap-amount-input" step="any" min="0" />'}
->>>>>>> Stashed changes
-      <span class="snap-asset">${metadata.assetCode || 'XLM'}</span>
-    </div>
-    <div class="snap-card-destination">
-      <span class="snap-dest-label">To:</span>
-<<<<<<< Updated upstream
-      <span class="snap-dest-value">${metadata.destination.slice(0, 8)}...${metadata.destination.slice(-4)}</span>
-=======
-      <span class="snap-dest-value">${metadata.destination.slice(0, 6)}...${metadata.destination.slice(-4)}</span>
->>>>>>> Stashed changes
-    </div>
-    <button class="snap-pay-btn">Pay with Stellar</button>
-    <div class="snap-card-footer">
-      <span class="snap-network-badge">${network}</span>
-<<<<<<< Updated upstream
-      <a href="${originalHref}" target="_blank" class="snap-view-link">Open</a>
-    </div>
-    <div class="snap-status" style="display: none;"></div>
-  `;
-
-  // Insert after the link element
-=======
-      <a href="${originalHref}" target="_blank" class="snap-view-link">View</a>
-    </div>
-    <div class="snap-status"></div>
-  `;
-
->>>>>>> Stashed changes
-  linkElement.parentNode?.insertBefore(card, linkElement.nextSibling);
-  console.log('[Stellar Snaps] Card rendered');
-
-<<<<<<< Updated upstream
-=======
-  setupPayButton(card, metadata, originalHref, network);
-}
-
-function setupPayButton(card: HTMLElement, metadata: SnapMetadata, originalHref: string, network: string) {
->>>>>>> Stashed changes
-  const payBtn = card.querySelector('.snap-pay-btn') as HTMLButtonElement;
-  const statusEl = card.querySelector('.snap-status') as HTMLDivElement;
-
-  payBtn?.addEventListener('click', async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    const amountInput = card.querySelector('.snap-amount-input') as HTMLInputElement;
-    const amount = amountInput?.value || metadata.amount;
-
-    if (!amount || parseFloat(amount) <= 0) {
-<<<<<<< Updated upstream
-      updateCardStatus(statusEl, 'Please enter a valid amount', 'error');
-=======
-      showStatus(statusEl, 'Enter a valid amount', 'error');
->>>>>>> Stashed changes
-      return;
-    }
-
-    payBtn.disabled = true;
-    payBtn.textContent = 'Connecting...';
-<<<<<<< Updated upstream
-    updateCardStatus(statusEl, '', '');
-
-    try {
-      const { isConnected } = await callFreighter('isConnected');
-      if (!isConnected) {
-        throw new Error('Freighter not connected. Click the Freighter icon to connect.');
-      }
-
-      const { isAllowed } = await callFreighter('isAllowed');
-      if (!isAllowed) {
-        await callFreighter('setAllowed');
-      }
-
-      const { address } = await callFreighter('getAddress');
-      if (!address) {
-        throw new Error('Please connect your wallet in Freighter');
-      }
-
-      const networkPassphrase = NETWORK_PASSPHRASES[network as keyof typeof NETWORK_PASSPHRASES];
-      const { networkPassphrase: currentNetwork } = await callFreighter('getNetwork');
-
-      if (currentNetwork !== networkPassphrase) {
-        throw new Error(`Please switch Freighter to ${network}`);
-      }
-
-      payBtn.textContent = 'Building tx...';
-
-      const horizonUrl = HORIZON_URLS[network as keyof typeof HORIZON_URLS];
-      const accountResponse = await fetch(`${horizonUrl}/accounts/${address}`);
-
-      if (!accountResponse.ok) {
-        if (accountResponse.status === 404) {
-          throw new Error('Account not funded. Get testnet XLM from friendbot.');
-        }
-        throw new Error('Failed to load account');
-      }
-
-      const account = await accountResponse.json();
-
-      const isLocalhost = originalHref.includes('localhost');
-      const baseUrl = isLocalhost ? 'http://localhost:3000' : 'https://stellar-snaps.vercel.app';
-
-      const buildResponse = await fetch(`${baseUrl}/api/build-tx`, {
-=======
-    showStatus(statusEl, '', '');
-
-    try {
-      const { isConnected } = await callFreighter('isConnected');
-      if (!isConnected) throw new Error('Connect Freighter first');
-
-      const { isAllowed } = await callFreighter('isAllowed');
-      if (!isAllowed) await callFreighter('setAllowed');
-
-      const { address } = await callFreighter('getAddress');
-      if (!address) throw new Error('Connect wallet in Freighter');
-
-      const networkPassphrase = NETWORK_PASSPHRASES[network as keyof typeof NETWORK_PASSPHRASES];
-      const { networkPassphrase: currentNetwork } = await callFreighter('getNetwork');
-      if (currentNetwork !== networkPassphrase) throw new Error(`Switch Freighter to ${network}`);
-
-      payBtn.textContent = 'Building...';
-
-      const horizonUrl = HORIZON_URLS[network as keyof typeof HORIZON_URLS];
-      const accountRes = await fetch(`${horizonUrl}/accounts/${address}`);
-      if (!accountRes.ok) throw new Error(accountRes.status === 404 ? 'Account not funded' : 'Failed to load account');
-
-      const account = await accountRes.json();
-      const baseUrl = originalHref.includes('localhost') ? 'http://localhost:3000' : 'https://stellar-snaps.vercel.app';
-
-      const buildRes = await fetch(`${baseUrl}/api/build-tx`, {
->>>>>>> Stashed changes
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source: address,
-          sequence: account.sequence,
-          destination: metadata.destination,
-          amount,
-          assetCode: metadata.assetCode,
-          assetIssuer: metadata.assetIssuer,
-          memo: metadata.memo,
-          memoType: metadata.memoType,
-          network,
-        }),
-      });
-
-<<<<<<< Updated upstream
-      if (!buildResponse.ok) {
-        const err = await buildResponse.json();
-        throw new Error(err?.error || 'Failed to build transaction');
-      }
-
-      const { xdr } = await buildResponse.json();
-
-      payBtn.textContent = 'Sign in wallet...';
-
-      const { signedTxXdr } = await callFreighter('signTransaction', {
-        xdr,
-        networkPassphrase,
-      });
-
-      payBtn.textContent = 'Submitting...';
-
-      const submitResponse = await fetch(`${horizonUrl}/transactions`, {
-=======
-      if (!buildRes.ok) throw new Error('Failed to build tx');
-      const { xdr } = await buildRes.json();
-
-      payBtn.textContent = 'Sign...';
-      const { signedTxXdr } = await callFreighter('signTransaction', { xdr, networkPassphrase });
-
-      payBtn.textContent = 'Submitting...';
-      const submitRes = await fetch(`${horizonUrl}/transactions`, {
->>>>>>> Stashed changes
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `tx=${encodeURIComponent(signedTxXdr)}`,
-      });
-
-<<<<<<< Updated upstream
-      const result = await submitResponse.json();
-
-      if (submitResponse.ok) {
-        payBtn.textContent = 'Paid!';
-        payBtn.className = 'snap-pay-btn snap-pay-success';
-        updateCardStatus(statusEl, `Success! TX: ${result.hash.slice(0, 8)}...`, 'success');
-      } else {
-        const errorMessage = result?.extras?.result_codes?.transaction || 'Transaction failed';
-        throw new Error(errorMessage);
-      }
-    } catch (err: any) {
-      console.error('[Stellar Snaps] Payment error:', err);
-      payBtn.disabled = false;
-      payBtn.textContent = 'Try Again';
-
-      if (err?.message?.includes('User declined') || err?.message?.includes('cancelled')) {
-        updateCardStatus(statusEl, 'Cancelled', 'info');
-      } else {
-        updateCardStatus(statusEl, err?.message || 'Payment failed', 'error');
-      }
-=======
-      const result = await submitRes.json();
-      if (submitRes.ok) {
-        payBtn.textContent = 'Paid!';
-        payBtn.className = 'snap-pay-btn snap-pay-success';
-        showStatus(statusEl, `TX: ${result.hash.slice(0, 8)}...`, 'success');
-      } else {
-        throw new Error(result?.extras?.result_codes?.transaction || 'Failed');
-      }
-    } catch (err: any) {
-      payBtn.disabled = false;
-      payBtn.textContent = 'Try Again';
-      showStatus(statusEl, err?.message || 'Payment failed', 'error');
->>>>>>> Stashed changes
-    }
-  });
-}
-
-<<<<<<< Updated upstream
-function updateCardStatus(statusEl: HTMLDivElement, message: string, type: string) {
-  if (!message) {
-    statusEl.style.display = 'none';
-    return;
-  }
-  statusEl.style.display = 'block';
-  statusEl.textContent = message;
-  statusEl.className = `snap-status snap-status-${type}`;
-=======
 function showStatus(el: HTMLElement, msg: string, type: string) {
   el.textContent = msg;
   el.className = `snap-status ${type ? `snap-status-${type}` : ''}`;
   el.style.display = msg ? 'block' : 'none';
->>>>>>> Stashed changes
 }
 
 function showNotification(message: string, type: 'info' | 'success' | 'error') {
   document.querySelector('.stellar-snap-notification')?.remove();
-<<<<<<< Updated upstream
-
-  const notification = document.createElement('div');
-  notification.className = `stellar-snap-notification snap-notif-${type}`;
-  notification.textContent = message;
-  document.body.appendChild(notification);
-
-  setTimeout(() => notification.remove(), 4000);
-=======
   const el = document.createElement('div');
   el.className = `stellar-snap-notification snap-notif-${type}`;
   el.textContent = message;
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 3000);
->>>>>>> Stashed changes
 }
 
 function escapeHtml(str: string): string {
@@ -848,6 +603,8 @@ function escapeHtml(str: string): string {
   div.textContent = str;
   return div.innerHTML;
 }
+
+// ============ START ============
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
