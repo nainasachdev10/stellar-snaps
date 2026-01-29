@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { db } from '../../../lib/db';
+import { registry, type RegistryEntryRow } from '../../../lib/db/schema';
+import { eq } from 'drizzle-orm';
 
 /**
- * Registry of trusted domains that can serve Stellar Snaps
- * 
- * Similar to Dialect's Blinks registry:
- * - Extensions fetch this list to know which domains to trust
- * - Domains must be verified before being marked as "trusted"
- * - Unverified domains can still work but show warning badge
+ * Registry of trusted domains that can serve Stellar Snaps.
+ * Stored in the database. Extension fetches this list to know which domains to trust.
  */
 
 export interface RegistryEntry {
@@ -19,55 +18,92 @@ export interface RegistryEntry {
   verifiedAt?: string;
 }
 
-// For now, hardcoded registry. Later: move to database
-const REGISTRY: RegistryEntry[] = [
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Cache-Control': 'public, max-age=300',
+};
+
+const DEFAULT_DOMAINS: Omit<RegistryEntry, 'registeredAt' | 'verifiedAt'>[] = [
   {
     domain: 'stellar-snaps.vercel.app',
     status: 'trusted',
     name: 'Stellar Snaps',
     description: 'Official Stellar Snaps service',
-    registeredAt: '2025-01-01T00:00:00Z',
-    verifiedAt: '2025-01-01T00:00:00Z',
   },
   {
     domain: 'localhost:3000',
     status: 'trusted',
     name: 'Local Development',
     description: 'Local development server',
-    registeredAt: '2025-01-01T00:00:00Z',
-    verifiedAt: '2025-01-01T00:00:00Z',
+  },
+  {
+    domain: 'test-sdk-kappa.vercel.app',
+    status: 'trusted',
+    name: 'Stellar Snaps SDK Demo',
+    description: 'SDK v0.3.2 test and demo site',
   },
 ];
 
-// GET /api/registry - returns list of all registered domains
+async function ensureRegistrySeeded() {
+  const existing = await db.select().from(registry).limit(1);
+  if (existing.length > 0) return;
+
+  const now = new Date();
+  await db
+    .insert(registry)
+    .values(
+      DEFAULT_DOMAINS.map((d) => ({
+        domain: d.domain,
+        status: d.status,
+        name: d.name ?? null,
+        description: d.description ?? null,
+        icon: d.icon ?? null,
+        registeredAt: now,
+        verifiedAt: d.status === 'trusted' ? now : null,
+      }))
+    )
+    .onConflictDoNothing({ target: registry.domain });
+}
+
+function rowToEntry(row: RegistryEntryRow): RegistryEntry {
+  return {
+    domain: row.domain,
+    status: (row.status as RegistryEntry['status']) ?? 'unverified',
+    name: row.name ?? undefined,
+    description: row.description ?? undefined,
+    icon: row.icon ?? undefined,
+    registeredAt: row.registeredAt?.toISOString() ?? new Date().toISOString(),
+    verifiedAt: row.verifiedAt?.toISOString(),
+  };
+}
+
+// GET /api/registry - returns list of all registered domains (or single domain if ?domain=)
 export async function GET(request: NextRequest) {
-  // Optional: filter by domain
-  const domain = request.nextUrl.searchParams.get('domain');
-  
-  if (domain) {
-    const entry = REGISTRY.find(e => e.domain === domain);
-    if (entry) {
-      return NextResponse.json(entry, {
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Cache-Control': 'public, max-age=300', // Cache for 5 minutes
-        },
-      });
-    }
-    return NextResponse.json(
-      { error: 'Domain not found', domain },
-      { status: 404 }
-    );
+  try {
+    await ensureRegistrySeeded();
+  } catch (e) {
+    console.error('[registry] Seed failed:', e);
   }
 
-  return NextResponse.json(
-    { domains: REGISTRY },
-    {
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'public, max-age=300',
-      },
+  const domain = request.nextUrl.searchParams.get('domain');
+
+  if (domain) {
+    const rows = await db.select().from(registry).where(eq(registry.domain, domain));
+    const entry = rows[0];
+    if (!entry) {
+      return NextResponse.json(
+        { error: 'Domain not found', domain },
+        { status: 404, headers: CORS_HEADERS }
+      );
     }
+    return NextResponse.json(rowToEntry(entry), { headers: CORS_HEADERS });
+  }
+
+  const rows = await db.select().from(registry);
+  const domains = rows.map(rowToEntry);
+  return NextResponse.json(
+    { domains },
+    { headers: CORS_HEADERS }
   );
 }
 

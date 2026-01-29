@@ -1,5 +1,15 @@
 import { pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 
+export const registry = pgTable('registry', {
+  domain: text('domain').primaryKey(),
+  status: text('status').notNull().default('unverified'), // 'trusted' | 'unverified' | 'blocked'
+  name: text('name'),
+  description: text('description'),
+  icon: text('icon'),
+  registeredAt: timestamp('registered_at').defaultNow(),
+  verifiedAt: timestamp('verified_at'),
+});
+
 export const snaps = pgTable('snaps', {
   id: text('id').primaryKey(),
   creator: text('creator').notNull(),
@@ -27,3 +37,6 @@ export const snaps = pgTable('snaps', {
 
 export type Snap = typeof snaps.$inferSelect;
 export type NewSnap = typeof snaps.$inferInsert;
+
+export type RegistryEntryRow = typeof registry.$inferSelect;
+export type NewRegistryEntry = typeof registry.$inferInsert;

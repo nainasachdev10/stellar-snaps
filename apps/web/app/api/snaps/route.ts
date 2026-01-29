@@ -4,16 +4,27 @@ import { snaps } from '../../../lib/db/schema';
 import { nanoid } from 'nanoid';
 import { eq } from 'drizzle-orm';
 
+// CORS headers so SDK works from browser (e.g. createSnap, listSnaps, deleteSnap from a dApp)
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
+export async function OPTIONS() {
+  return new NextResponse(null, { headers: corsHeaders });
+}
+
 // GET /api/snaps - list snaps for a creator
 export async function GET(request: NextRequest) {
   const creator = request.nextUrl.searchParams.get('creator');
 
   if (!creator) {
-    return NextResponse.json({ error: 'creator param required' }, { status: 400 });
+    return NextResponse.json({ error: 'creator param required' }, { status: 400, headers: corsHeaders });
   }
 
   const results = await db.select().from(snaps).where(eq(snaps.creator, creator));
-  return NextResponse.json(results);
+  return NextResponse.json(results, { headers: corsHeaders });
 }
 
 // POST /api/snaps - create a new snap
@@ -24,12 +35,12 @@ export async function POST(request: NextRequest) {
     const { creator, title, description, destination, amount, assetCode, assetIssuer, memo, memoType, network, imageUrl } = body;
 
     if (!creator || !title || !destination) {
-      return NextResponse.json({ error: 'creator, title, and destination are required' }, { status: 400 });
+      return NextResponse.json({ error: 'creator, title, and destination are required' }, { status: 400, headers: corsHeaders });
     }
 
     // Validate destination
     if (destination.length !== 56 || !destination.startsWith('G')) {
-      return NextResponse.json({ error: 'Invalid Stellar destination address' }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid Stellar destination address' }, { status: 400, headers: corsHeaders });
     }
 
     const id = nanoid(8);
@@ -49,10 +60,10 @@ export async function POST(request: NextRequest) {
       imageUrl: imageUrl || null,
     }).returning();
 
-    return NextResponse.json(newSnap, { status: 201 });
+    return NextResponse.json(newSnap, { status: 201, headers: corsHeaders });
   } catch (error) {
     console.error('Error creating snap:', error);
-    return NextResponse.json({ error: 'Failed to create snap' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to create snap' }, { status: 500, headers: corsHeaders });
   }
 }
 
@@ -62,22 +73,22 @@ export async function DELETE(request: NextRequest) {
   const creator = request.nextUrl.searchParams.get('creator');
 
   if (!id || !creator) {
-    return NextResponse.json({ error: 'id and creator params required' }, { status: 400 });
+    return NextResponse.json({ error: 'id and creator params required' }, { status: 400, headers: corsHeaders });
   }
 
   // First check ownership
   const [snap] = await db.select().from(snaps).where(eq(snaps.id, id));
 
   if (!snap) {
-    return NextResponse.json({ error: 'Snap not found' }, { status: 404 });
+    return NextResponse.json({ error: 'Snap not found' }, { status: 404, headers: corsHeaders });
   }
 
   if (snap.creator !== creator) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 403, headers: corsHeaders });
   }
 
   // Now delete
   await db.delete(snaps).where(eq(snaps.id, id));
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true }, { headers: corsHeaders });
 }
